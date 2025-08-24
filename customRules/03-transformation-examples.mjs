@@ -1,3 +1,4 @@
+// @ts-nocheck - Complex transformation examples with dynamic typing for demonstration purposes
 import { ProxyHandler } from '../dist/commonHandlers/ProxyHandler.mjs';
 
 /**
@@ -26,13 +27,16 @@ function createTransformationHandler() {
 		},
 		responseTransform: (response) => {
 			// Add processing time to all responses  
-			return {
-				...response,
-				result: {
-					...response.result,
-					_processedAt: new Date().toISOString()
-				}
-			};
+			if (response.result && typeof response.result === 'object') {
+				return {
+					...response,
+					result: {
+						...response.result,
+						_processedAt: new Date().toISOString()
+					}
+				};
+			}
+			return response;
 		}
 	});
 
@@ -42,7 +46,7 @@ function createTransformationHandler() {
 		upstreamUrl: 'http://user-service:3001/jsonrpc',
 		requestTransform: async (request) => {
 			// Validate and normalize user creation parameters
-			if (request.params && typeof request.params === 'object') {
+			if (request.params && typeof request.params === 'object' && !Array.isArray(request.params)) {
 				const params = request.params;
 				
 				// Add default values
@@ -112,7 +116,7 @@ function createTransformationHandler() {
 		upstreamUrl: 'http://analytics-service:3003/jsonrpc',
 		requestTransform: async (request) => {
 			// Enrich analytics data with additional context
-			if (request.params && typeof request.params === 'object') {
+			if (request.params && typeof request.params === 'object' && !Array.isArray(request.params)) {
 				request.params = {
 					...request.params,
 					enriched: {
@@ -126,11 +130,11 @@ function createTransformationHandler() {
 		},
 		responseTransform: async (response, originalRequest) => {
 			// Add tracking confirmation
-			if (response.result) {
+			if (response.result && typeof response.result === 'object') {
 				response.result = {
 					...response.result,
 					trackingConfirmed: true,
-					originalEventType: originalRequest?.params?.eventType
+					originalEventType: originalRequest?.params && typeof originalRequest.params === 'object' && !Array.isArray(originalRequest.params) ? originalRequest.params.eventType : undefined
 				};
 			}
 			return response;
@@ -148,7 +152,7 @@ function createTransformationHandler() {
 		upstreamUrl: 'http://payment-service:3004/jsonrpc',
 		requestTransform: async (request) => {
 			// Strict validation for payment requests
-			if (!request.params || typeof request.params !== 'object') {
+			if (!request.params || typeof request.params !== 'object' || Array.isArray(request.params)) {
 				throw new Error('Payment request must have params');
 			}
 
@@ -253,5 +257,5 @@ function generateSecurityToken() {
 	return `tok_${Math.random().toString(36).substr(2, 16)}`;
 }
 
-// Export the configured handler
-export default createTransformationHandler();
+// Export the configured handler as handlers array
+export const handlers = [createTransformationHandler()];

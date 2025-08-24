@@ -1,3 +1,4 @@
+// @ts-check
 import { RequestHandler } from '../dist/RequestHandler.mjs';
 
 /**
@@ -5,10 +6,18 @@ import { RequestHandler } from '../dist/RequestHandler.mjs';
  */
 class SystemStatusHandler extends RequestHandler {
 
+	/**
+	 * @param {import('../src/types.mjs').JsonRpcRequest} request
+	 * @returns {Promise<boolean>}
+	 */
 	async canHandle(request) {
 		return request.method === 'system.status';
 	}
 
+	/**
+	 * @param {import('../src/types.mjs').JsonRpcRequest} request
+	 * @returns {Promise<import('../src/types.mjs').JsonRpcResponse>}
+	 */
 	async handle(request) {
 		console.log(`🔧 System status handler processing request: ${request.id}`);
 		
@@ -30,10 +39,18 @@ class SystemStatusHandler extends RequestHandler {
  */
 class VersionHandler extends RequestHandler {
 
+	/**
+	 * @param {import('../src/types.mjs').JsonRpcRequest} request
+	 * @returns {Promise<boolean>}
+	 */
 	async canHandle(request) {
 		return request.method === 'system.version';
 	}
 
+	/**
+	 * @param {import('../src/types.mjs').JsonRpcRequest} request
+	 * @returns {Promise<import('../src/types.mjs').JsonRpcResponse>}
+	 */
 	async handle(request) {
 		console.log(`📦 Version handler processing request: ${request.id}`);
 		
