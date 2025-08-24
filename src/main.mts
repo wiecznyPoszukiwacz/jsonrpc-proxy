@@ -2,6 +2,8 @@
 
 import { ProxyServer } from "./ProxyServer.mjs";
 import { HttpTransport } from './HttpTransport.mjs'
+import { ProxyHandler } from "./commonHandlers/ProxyHandler.mjs";
+import { CustomHandlerLoader } from "./CustomHandlerLoader.mjs";
 
 /**
  * Main entry point for the JSON-RPC proxy server
@@ -10,14 +12,40 @@ import { HttpTransport } from './HttpTransport.mjs'
 async function main(): Promise<void> {
 	console.log('🚀 Starting JSON-RPC Proxy Server...');
 
-	const version: string = '0.1.0';
+	const version: string = '0.2.0';
 	console.log(`📦 Version: ${version}`);
 
+	// Initialize server
 	const server = new ProxyServer();
+	
+	// Configure HTTP transport
 	const httpTransport = new HttpTransport({
-		port: 22245
+		port: 22246
 	})
 	server.registerTransport(httpTransport)
+
+	// Load custom handlers from customRules/ directory
+	console.log('🔍 Loading custom handlers...');
+	const customLoader = new CustomHandlerLoader({
+		customRulesDirectory: 'customRules',
+		enableLogging: true
+	});
+	
+	const customHandlers = await customLoader.loadHandlers();
+	server.registerHandlers(customHandlers);
+
+	// Register default proxy handler (fallback)
+	const proxyHandler = new ProxyHandler({
+		enableLogging: true
+	});
+	
+	// Example proxy rule - you can configure these as needed
+	// proxyHandler.addHandlerRule({
+	// 	method: 'example.method',
+	// 	upstreamUrl: 'http://localhost:3001'
+	// });
+	
+	server.registerHandler(proxyHandler);
 
 	await server.start()
 }
