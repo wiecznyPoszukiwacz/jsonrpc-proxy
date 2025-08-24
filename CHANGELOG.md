@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2024-08-24
+
+### Added
+- ✨ **Rule-level request and response transformations** in ProxyHandlerRule
+  - Per-method transformation functions for granular control
+  - Support for both `requestTransform` and `responseTransform` in individual rules
+  - Original request context available in response transformations
+- 🔧 **Advanced transformation options** with `TransformOptions`:
+  - `priority`: Control execution order ('before' or 'after' global transformations)
+  - `includeOriginalRequest`: Pass original request to response transformation
+  - `onTransformError`: Configurable error handling ('throw', 'skip', 'log-and-skip')
+- 📝 **New transformation types** in types.mts:
+  - `RequestTransformFunction` type for type-safe request transformations
+  - `ResponseTransformFunction` type with optional original request parameter
+  - `TransformOptions` interface for fine-grained control
+- ✅ **Enhanced validation** for transformation properties in ProxyHandlerRule
+- 🧪 **Comprehensive tests** for all transformation scenarios and error handling
+- 📚 **Example transformation handler** in customRules/03-transformation-examples.mjs
+
+### Enhanced
+- 🔄 **Transformation pipeline** now supports layered transformations with priority system
+- 🛡️ **Error handling** with configurable strategies for transformation failures
+- 🔍 **Better error messages** with specific transformation failure details
+- 📖 **Improved JSDoc documentation** for all transformation-related methods
+
+### Technical Details
+- Rule transformations can execute before or after global transformations
+- Response transformations receive original request context when enabled
+- Robust error handling prevents cascade failures from transformation errors
+- Backward compatible with existing global transformation functions
+- Type-safe implementation with comprehensive TypeScript support
+
 ## [0.2.0] - 2025-08-24
 
 ### Added

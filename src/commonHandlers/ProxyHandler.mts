@@ -1,6 +1,13 @@
 import { JsonRpcHttpClient } from "../HttpClient.mjs";
 import { RequestHandler } from "../RequestHandler.mjs";
-import { JsonRpcRequest, JsonRpcResponse, JsonRpcErrorCode } from "../types.mjs";
+import { 
+	JsonRpcRequest, 
+	JsonRpcResponse, 
+	JsonRpcErrorCode,
+	RequestTransformFunction,
+	ResponseTransformFunction,
+	TransformOptions
+} from "../types.mjs";
 
 export type ProxyHandlerRule = {
 	/** JSON-RPC method name to match */
@@ -17,6 +24,12 @@ export type ProxyHandlerRule = {
 		delayMs: number;
 		exponentialBackoff?: boolean;
 	};
+	/** Request body transformation function for this specific method */
+	requestTransform?: RequestTransformFunction;
+	/** Response body transformation function for this specific method */
+	responseTransform?: ResponseTransformFunction;
+	/** Advanced transformation options */
+	transformOptions?: TransformOptions;
 }
 
 export type ProxyHandlerOptions = {
@@ -42,9 +55,10 @@ export type ProxyHandlerOptions = {
 	/** Enable request/response logging */
 	enableLogging?: boolean;
 	
-	/** Request transformation functions */
-	requestTransform?: (request: JsonRpcRequest) => JsonRpcRequest | Promise<JsonRpcRequest>;
-	responseTransform?: (response: JsonRpcResponse) => JsonRpcResponse | Promise<JsonRpcResponse>;
+	/** Global request transformation function */
+	requestTransform?: RequestTransformFunction;
+	/** Global response transformation function */
+	responseTransform?: ResponseTransformFunction;
 }
 
 export class ProxyHandler extends RequestHandler {
@@ -102,8 +116,8 @@ export class ProxyHandler extends RequestHandler {
 		}
 
 		try {
-			// Apply request transformation if configured
-			const transformedRequest = await this.applyRequestTransformation(request);
+			// Apply request transformations (rule-specific then global)
+			const transformedRequest = await this.applyRequestTransformations(request, rule);
 			
 			// Create HTTP client with rule-specific or default configuration
 			const clientOptions = this.getClientOptions(rule);
@@ -116,14 +130,23 @@ export class ProxyHandler extends RequestHandler {
 				request.id
 			);
 			
-			// Apply response transformation if configured
-			const transformedResponse = await this.applyResponseTransformation(response);
+			// Apply response transformations (global then rule-specific)
+			const transformedResponse = await this.applyResponseTransformations(response, request, rule);
 			
 			// Log successful request if enabled
 			this.logRequest(request, transformedResponse, rule.upstreamUrl);
 			
 			return transformedResponse;
 		} catch (error) {
+			// Check if this is a transformation error
+			if (error instanceof Error && error.message.includes('transformation failed')) {
+				return this.createErrorResponse(
+					request.id, 
+					JsonRpcErrorCode.INTERNAL_ERROR, 
+					error.message
+				);
+			}
+			
 			// Log failed request if enabled
 			this.logError(request, error, rule.upstreamUrl);
 			return this.handleUpstreamError(request.id, error);
@@ -202,6 +225,32 @@ export class ProxyHandler extends RequestHandler {
 
 		if (!this.isValidUrl(rule.upstreamUrl)) {
 			throw new Error(`Invalid upstreamUrl: ${rule.upstreamUrl}`);
+		}
+
+		// Validate transformation functions
+		if (rule.requestTransform && typeof rule.requestTransform !== 'function') {
+			throw new Error('ProxyHandlerRule.requestTransform must be a function');
+		}
+
+		if (rule.responseTransform && typeof rule.responseTransform !== 'function') {
+			throw new Error('ProxyHandlerRule.responseTransform must be a function');
+		}
+
+		// Validate transformation options
+		if (rule.transformOptions) {
+			const { priority, includeOriginalRequest, onTransformError } = rule.transformOptions;
+			
+			if (priority && !['before', 'after'].includes(priority)) {
+				throw new Error('ProxyHandlerRule.transformOptions.priority must be "before" or "after"');
+			}
+
+			if (includeOriginalRequest !== undefined && typeof includeOriginalRequest !== 'boolean') {
+				throw new Error('ProxyHandlerRule.transformOptions.includeOriginalRequest must be a boolean');
+			}
+
+			if (onTransformError && !['throw', 'skip', 'log-and-skip'].includes(onTransformError)) {
+				throw new Error('ProxyHandlerRule.transformOptions.onTransformError must be "throw", "skip", or "log-and-skip"');
+			}
 		}
 	}
 
@@ -321,27 +370,136 @@ export class ProxyHandler extends RequestHandler {
 	}
 
 	/**
-	 * Applies request transformation if configured
+	 * Applies request transformations based on rule configuration and priority
 	 * @param request - Original request
+	 * @param rule - ProxyHandlerRule containing transformation configuration
 	 * @returns Transformed request
 	 */
-	private async applyRequestTransformation(request: JsonRpcRequest): Promise<JsonRpcRequest> {
-		if (this.options.requestTransform) {
-			return await this.options.requestTransform(request);
+	private async applyRequestTransformations(request: JsonRpcRequest, rule: ProxyHandlerRule): Promise<JsonRpcRequest> {
+		let transformedRequest = request;
+		const options = rule.transformOptions || {};
+		const priority = options.priority || 'after';
+
+		try {
+			// Apply rule-specific transformation first if priority is 'before'
+			if (priority === 'before' && rule.requestTransform) {
+				transformedRequest = await this.safeTransform(
+					rule.requestTransform,
+					transformedRequest,
+					'rule request transform',
+					options.onTransformError || 'throw'
+				) || transformedRequest;
+			}
+
+			// Apply global transformation
+			if (this.options.requestTransform) {
+				transformedRequest = await this.safeTransform(
+					this.options.requestTransform,
+					transformedRequest,
+					'global request transform',
+					'throw'
+				) || transformedRequest;
+			}
+
+			// Apply rule-specific transformation after if priority is 'after' (default)
+			if (priority === 'after' && rule.requestTransform) {
+				transformedRequest = await this.safeTransform(
+					rule.requestTransform,
+					transformedRequest,
+					'rule request transform',
+					options.onTransformError || 'throw'
+				) || transformedRequest;
+			}
+
+			return transformedRequest;
+		} catch (error) {
+			throw new Error(`Request transformation failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
-		return request;
 	}
 
 	/**
-	 * Applies response transformation if configured
+	 * Applies response transformations based on rule configuration and priority
 	 * @param response - Original response
+	 * @param originalRequest - Original request for context
+	 * @param rule - ProxyHandlerRule containing transformation configuration
 	 * @returns Transformed response
 	 */
-	private async applyResponseTransformation(response: JsonRpcResponse): Promise<JsonRpcResponse> {
-		if (this.options.responseTransform) {
-			return await this.options.responseTransform(response);
+	private async applyResponseTransformations(response: JsonRpcResponse, originalRequest: JsonRpcRequest, rule: ProxyHandlerRule): Promise<JsonRpcResponse> {
+		let transformedResponse = response;
+		const options = rule.transformOptions || {};
+		const priority = options.priority || 'after';
+		const includeOriginalRequest = options.includeOriginalRequest ?? true;
+
+		try {
+			// Apply rule-specific transformation first if priority is 'before'
+			if (priority === 'before' && rule.responseTransform) {
+				transformedResponse = await this.safeTransform(
+					(resp) => rule.responseTransform!(resp, includeOriginalRequest ? originalRequest : undefined),
+					transformedResponse,
+					'rule response transform',
+					options.onTransformError || 'throw'
+				) || transformedResponse;
+			}
+
+			// Apply global transformation (legacy compatibility - no originalRequest parameter)
+			if (this.options.responseTransform) {
+				transformedResponse = await this.safeTransform(
+					this.options.responseTransform,
+					transformedResponse,
+					'global response transform',
+					'throw'
+				) || transformedResponse;
+			}
+
+			// Apply rule-specific transformation after if priority is 'after' (default)
+			if (priority === 'after' && rule.responseTransform) {
+				transformedResponse = await this.safeTransform(
+					(resp) => rule.responseTransform!(resp, includeOriginalRequest ? originalRequest : undefined),
+					transformedResponse,
+					'rule response transform',
+					options.onTransformError || 'throw'
+				) || transformedResponse;
+			}
+
+			return transformedResponse;
+		} catch (error) {
+			throw new Error(`Response transformation failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
-		return response;
+	}
+
+	/**
+	 * Safely executes a transformation function with error handling
+	 * @param transformFn - Transformation function to execute
+	 * @param data - Data to transform
+	 * @param transformName - Name of transformation for logging
+	 * @param errorStrategy - How to handle transformation errors
+	 * @returns Transformed data or null if skipped
+	 */
+	private async safeTransform<T>(
+		transformFn: (data: T) => T | Promise<T>,
+		data: T,
+		transformName: string,
+		errorStrategy: 'throw' | 'skip' | 'log-and-skip'
+	): Promise<T | null> {
+		try {
+			return await transformFn(data);
+		} catch (error) {
+			const errorMessage = `${transformName} failed: ${error instanceof Error ? error.message : String(error)}`;
+
+			switch (errorStrategy) {
+				case 'throw':
+					throw new Error(errorMessage);
+				case 'skip':
+					return null;
+				case 'log-and-skip':
+					if (this.options.enableLogging) {
+						console.warn(`⚠️ ${errorMessage} - skipping transformation`);
+					}
+					return null;
+				default:
+					throw new Error(errorMessage);
+			}
+		}
 	}
 
 	/**

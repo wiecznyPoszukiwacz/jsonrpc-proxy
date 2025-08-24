@@ -56,7 +56,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '02-second.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				export default class SecondHandler extends RequestHandler {
 					async canHandle(request) { return request.method === 'second'; }
 					async handle(request) { return { jsonrpc: '2.0', id: request.id, result: 'second' }; }
@@ -67,7 +67,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '01-first.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				export default class FirstHandler extends RequestHandler {
 					async canHandle(request) { return request.method === 'first'; }
 					async handle(request) { return { jsonrpc: '2.0', id: request.id, result: 'first' }; }
@@ -88,7 +88,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '01-multi.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				
 				class Handler1 extends RequestHandler {
 					async canHandle(request) { return request.method === 'test1'; }
@@ -116,7 +116,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '01-valid.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				export default class ValidHandler extends RequestHandler {
 					async canHandle(request) { return request.method === 'valid'; }
 					async handle(request) { return { jsonrpc: '2.0', id: request.id, result: 'valid' }; }
@@ -134,7 +134,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '03-valid2.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				export default class Valid2Handler extends RequestHandler {
 					async canHandle(request) { return request.method === 'valid2'; }
 					async handle(request) { return { jsonrpc: '2.0', id: request.id, result: 'valid2' }; }
@@ -163,7 +163,7 @@ describe('CustomHandlerLoader', () => {
 			await fs.writeFile(
 				join(testDir, '01-excluded.mjs'),
 				`
-				import { RequestHandler } from '../src/RequestHandler.mjs';
+				import { RequestHandler } from '../dist/RequestHandler.mjs';
 				export default class ExcludedHandler extends RequestHandler {
 					async canHandle(request) { return false; }
 					async handle(request) { return { jsonrpc: '2.0', id: request.id, result: 'excluded' }; }

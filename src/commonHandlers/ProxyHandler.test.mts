@@ -71,6 +71,42 @@ describe('ProxyHandler', () => {
 				proxyHandler.addHandlerRule({ ...mockRule, upstreamUrl: 'invalid-url' });
 			}).toThrow('Invalid upstreamUrl');
 		});
+
+		it('should throw error for invalid requestTransform type', () => {
+			expect(() => {
+				proxyHandler.addHandlerRule({ 
+					...mockRule, 
+					requestTransform: 'not a function' as any 
+				});
+			}).toThrow('ProxyHandlerRule.requestTransform must be a function');
+		});
+
+		it('should throw error for invalid responseTransform type', () => {
+			expect(() => {
+				proxyHandler.addHandlerRule({ 
+					...mockRule, 
+					responseTransform: 'not a function' as any 
+				});
+			}).toThrow('ProxyHandlerRule.responseTransform must be a function');
+		});
+
+		it('should throw error for invalid transformOptions.priority', () => {
+			expect(() => {
+				proxyHandler.addHandlerRule({ 
+					...mockRule, 
+					transformOptions: { priority: 'invalid' as any }
+				});
+			}).toThrow('ProxyHandlerRule.transformOptions.priority must be "before" or "after"');
+		});
+
+		it('should throw error for invalid transformOptions.onTransformError', () => {
+			expect(() => {
+				proxyHandler.addHandlerRule({ 
+					...mockRule, 
+					transformOptions: { onTransformError: 'invalid' as any }
+				});
+			}).toThrow('ProxyHandlerRule.transformOptions.onTransformError must be "throw", "skip", or "log-and-skip"');
+		});
 	});
 
 	describe('canHandle', () => {
@@ -214,11 +250,11 @@ describe('ProxyHandler', () => {
 	});
 
 	describe('request/response transformation', () => {
-		it('should apply request transformation', async () => {
+		it('should apply global request transformation', async () => {
 			const transformOptions: ProxyHandlerOptions = {
 				requestTransform: (req) => ({
 					...req,
-					params: { ...req.params as any, transformed: true }
+					params: { ...req.params as any, globalTransformed: true }
 				})
 			};
 
@@ -239,15 +275,15 @@ describe('ProxyHandler', () => {
 			
 			expect(makeRequestCall[0].params).toEqual({
 				original: true,
-				transformed: true
+				globalTransformed: true
 			});
 		});
 
-		it('should apply response transformation', async () => {
+		it('should apply global response transformation', async () => {
 			const transformOptions: ProxyHandlerOptions = {
 				responseTransform: (res) => ({
 					...res,
-					result: { ...res.result as any, transformed: true }
+					result: { ...res.result as any, globalTransformed: true }
 				})
 			};
 
@@ -265,8 +301,211 @@ describe('ProxyHandler', () => {
 			expect(response.result).toEqual({
 				success: true,
 				url: 'http://localhost:3000/jsonrpc',
-				transformed: true
+				globalTransformed: true
 			});
+		});
+
+		it('should apply rule-specific request transformation with default priority (after global)', async () => {
+			const handler = new ProxyHandler({
+				requestTransform: (req) => ({
+					...req,
+					params: { ...req.params as any, globalTransformed: true }
+				})
+			});
+
+			const ruleWithTransform: ProxyHandlerRule = {
+				...mockRule,
+				requestTransform: (req) => ({
+					...req,
+					params: { ...req.params as any, ruleTransformed: true }
+				})
+			};
+
+			handler.addHandlerRule(ruleWithTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1,
+				params: { original: true }
+			};
+
+			await handler.handle(request);
+
+			const makeRequestCall = mockMakeRequest.mock.calls[0];
+			expect(makeRequestCall[0].params).toEqual({
+				original: true,
+				globalTransformed: true,
+				ruleTransformed: true
+			});
+		});
+
+		it('should apply rule-specific response transformation with original request context', async () => {
+			const handler = new ProxyHandler({});
+
+			const ruleWithTransform: ProxyHandlerRule = {
+				...mockRule,
+				responseTransform: (res, originalReq) => ({
+					...res,
+					result: { 
+						...res.result as any, 
+						ruleTransformed: true,
+						originalMethod: originalReq?.method
+					}
+				}),
+				transformOptions: {
+					includeOriginalRequest: true
+				}
+			};
+
+			handler.addHandlerRule(ruleWithTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1
+			};
+
+			const response = await handler.handle(request);
+			
+			expect(response.result).toEqual({
+				success: true,
+				url: 'http://localhost:3000/jsonrpc',
+				ruleTransformed: true,
+				originalMethod: 'test.method'
+			});
+		});
+
+		it('should apply transformations with before priority (rule before global)', async () => {
+			const handler = new ProxyHandler({
+				requestTransform: (req) => ({
+					...req,
+					params: { ...req.params as any, global: 'second' }
+				})
+			});
+
+			const ruleWithTransform: ProxyHandlerRule = {
+				...mockRule,
+				requestTransform: (req) => ({
+					...req,
+					params: { ...req.params as any, rule: 'first' }
+				}),
+				transformOptions: {
+					priority: 'before'
+				}
+			};
+
+			handler.addHandlerRule(ruleWithTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1,
+				params: { original: true }
+			};
+
+			await handler.handle(request);
+
+			const makeRequestCall = mockMakeRequest.mock.calls[0];
+			expect(makeRequestCall[0].params).toEqual({
+				original: true,
+				rule: 'first',
+				global: 'second'
+			});
+		});
+
+		it('should handle transformation errors with skip strategy', async () => {
+			const handler = new ProxyHandler({});
+
+			const ruleWithFailingTransform: ProxyHandlerRule = {
+				...mockRule,
+				requestTransform: () => {
+					throw new Error('Transformation failed');
+				},
+				transformOptions: {
+					onTransformError: 'skip'
+				}
+			};
+
+			handler.addHandlerRule(ruleWithFailingTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1,
+				params: { original: true }
+			};
+
+			await handler.handle(request);
+
+			// Original request should be used since transformation was skipped
+			const makeRequestCall = mockMakeRequest.mock.calls[0];
+			expect(makeRequestCall[0].params).toEqual({ original: true });
+		});
+
+		it('should handle transformation errors with log-and-skip strategy', async () => {
+			const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			
+			const handler = new ProxyHandler({ enableLogging: true });
+
+			const ruleWithFailingTransform: ProxyHandlerRule = {
+				...mockRule,
+				requestTransform: () => {
+					throw new Error('Transformation failed');
+				},
+				transformOptions: {
+					onTransformError: 'log-and-skip'
+				}
+			};
+
+			handler.addHandlerRule(ruleWithFailingTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1,
+				params: { original: true }
+			};
+
+			await handler.handle(request);
+
+			// Should log the error
+			expect(consoleSpy).toHaveBeenCalledWith(
+				expect.stringContaining('⚠️ rule request transform failed: Transformation failed - skipping transformation')
+			);
+
+			// Original request should be used
+			const makeRequestCall = mockMakeRequest.mock.calls[0];
+			expect(makeRequestCall[0].params).toEqual({ original: true });
+
+			consoleSpy.mockRestore();
+		});
+
+		it('should throw transformation errors with throw strategy (default)', async () => {
+			const handler = new ProxyHandler({});
+
+			const ruleWithFailingTransform: ProxyHandlerRule = {
+				...mockRule,
+				requestTransform: () => {
+					throw new Error('Transformation failed');
+				}
+				// onTransformError defaults to 'throw'
+			};
+
+			handler.addHandlerRule(ruleWithFailingTransform);
+
+			const request: JsonRpcRequest = {
+				jsonrpc: '2.0',
+				method: 'test.method',
+				id: 1
+			};
+
+			const response = await handler.handle(request);
+
+			// Should return error response
+			expect(response.error).toBeDefined();
+			expect(response.error?.code).toBe(JsonRpcErrorCode.INTERNAL_ERROR);
+			expect(response.error?.message).toContain('Request transformation failed');
 		});
 	});
 
